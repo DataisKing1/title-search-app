@@ -225,6 +225,50 @@ npm run lint
 npx tsc --noEmit
 ```
 
+## CI/CD
+
+This project uses GitHub Actions for continuous integration and deployment.
+
+### Workflows
+
+| Workflow | Trigger | Description |
+|----------|---------|-------------|
+| **CI** | Push/PR to main | Runs tests, linting, and builds |
+| **Security** | Push/PR + Weekly | Dependency scanning and CodeQL analysis |
+| **Deploy** | Manual/Release | Builds and pushes Docker images to GHCR |
+
+### CI Pipeline
+
+On every push and pull request:
+- **Backend Tests** - Runs pytest with PostgreSQL and Redis services
+- **Backend Lint** - Checks code formatting with Black, isort, and flake8
+- **Frontend Build** - Type checks, lints, and builds the React app
+- **Docker Build** - Validates Docker images build successfully (main branch only)
+
+### Deployment
+
+To deploy manually:
+1. Go to Actions > Deploy > Run workflow
+2. Select the environment (staging/production)
+3. Click "Run workflow"
+
+For automatic deployment, create a release tag:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+### Required Secrets
+
+For deployment, configure these secrets in your repository:
+
+| Secret | Description |
+|--------|-------------|
+| `RAILWAY_TOKEN` | Railway deployment token (if using Railway) |
+| `VERCEL_TOKEN` | Vercel deployment token (if using Vercel) |
+| `VERCEL_ORG_ID` | Vercel organization ID |
+| `VERCEL_PROJECT_ID` | Vercel project ID |
+
 ## License
 
 MIT License - see LICENSE file for details.
