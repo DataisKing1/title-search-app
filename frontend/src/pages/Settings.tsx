@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import { User, Lock, Bell, Shield } from 'lucide-react'
 
 export default function Settings() {
-  const { user, updateUser } = useAuthStore()
+  const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'notifications'>('profile')
 
   // Password change form

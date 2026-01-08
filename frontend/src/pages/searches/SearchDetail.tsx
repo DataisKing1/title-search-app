@@ -15,7 +15,6 @@ import {
   Link as LinkIcon,
   Download,
   Shield,
-  Users,
 } from 'lucide-react'
 
 interface SearchDocument {

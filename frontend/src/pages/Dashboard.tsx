@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { searchesApi } from '../lib/api'
-import { Search, FileText, Clock, CheckCircle, XCircle, Plus } from 'lucide-react'
+import { Search, Clock, CheckCircle, XCircle, Plus } from 'lucide-react'
 
 export default function Dashboard() {
   const { data: recentSearches, isLoading } = useQuery({
