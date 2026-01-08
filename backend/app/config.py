@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./title_search.db"
     DATABASE_ECHO: bool = False
 
+    @property
+    def async_database_url(self) -> str:
+        """Get DATABASE_URL formatted for asyncpg/aiosqlite"""
+        url = self.DATABASE_URL
+        # Convert postgresql:// to postgresql+asyncpg://
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return url
+
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
