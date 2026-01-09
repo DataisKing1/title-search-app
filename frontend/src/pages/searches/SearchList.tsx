@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { searchesApi } from '@/lib/api'
+import { searchesApi } from '../../lib/api'
 import { Plus, Search, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function SearchList() {

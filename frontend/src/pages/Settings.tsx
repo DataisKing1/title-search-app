@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useAuthStore } from '@/store/auth'
-import { authApi } from '@/lib/api'
+import { useAuthStore } from '../store/auth'
+import { authApi } from '../lib/api'
 import toast from 'react-hot-toast'
 import { User, Lock, Bell, Shield } from 'lucide-react'
 

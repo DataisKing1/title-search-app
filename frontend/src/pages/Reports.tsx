@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { reportsApi } from '@/lib/api'
+import { reportsApi } from '../lib/api'
 import { FileText, Download, CheckCircle, Clock, AlertTriangle } from 'lucide-react'
-import { Report } from '@/lib/types'
+import { Report } from '../lib/types'
 
 export default function Reports() {
   const { data: reports, isLoading } = useQuery({
