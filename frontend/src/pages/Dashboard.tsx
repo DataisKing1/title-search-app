@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { searchesApi } from '../lib/api'
+import { searchesApi } from '@/lib/api'
 import { Search, Clock, CheckCircle, XCircle, Plus } from 'lucide-react'
 
 export default function Dashboard() {

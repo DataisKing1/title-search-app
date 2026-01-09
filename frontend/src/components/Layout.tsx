@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { useAuthStore } from '../store/auth'
+import { useAuthStore } from '@/store/auth'
 import {
   Home,
   Search,

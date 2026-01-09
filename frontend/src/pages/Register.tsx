@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { authApi, getErrorMessage } from '../lib/api'
+import { authApi, getErrorMessage } from '@/lib/api'
 import toast from 'react-hot-toast'
 
 export default function Register() {

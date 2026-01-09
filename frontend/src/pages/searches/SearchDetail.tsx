@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { searchesApi } from '../../lib/api'
+import { searchesApi } from '@/lib/api'
 import toast from 'react-hot-toast'
 import {
   ArrowLeft,

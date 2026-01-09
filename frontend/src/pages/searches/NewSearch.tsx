@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import { searchesApi, getErrorMessage } from '../../lib/api'
+import { searchesApi, getErrorMessage } from '@/lib/api'
 import toast from 'react-hot-toast'
 import { ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router-dom'

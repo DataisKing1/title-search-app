@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { batchApi } from '../lib/api'
+import { batchApi } from '@/lib/api'
 import toast from 'react-hot-toast'
 import {
   Upload,
@@ -12,7 +12,7 @@ import {
   Trash2,
   AlertTriangle,
 } from 'lucide-react'
-import { Batch } from '../lib/types'
+import { Batch } from '@/lib/types'
 
 export default function BatchUpload() {
   const queryClient = useQueryClient()
