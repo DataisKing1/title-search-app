@@ -15,19 +15,24 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Production stage
-FROM node:20-alpine AS runner
+# Production stage - use nginx for static files
+FROM nginx:alpine AS runner
 
-WORKDIR /app
+# Copy built files to nginx html directory
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Install serve globally
-RUN npm install -g serve
-
-# Copy built files from builder
-COPY --from=builder /app/dist ./dist
+# Create nginx config template for dynamic port
+RUN echo 'server { \
+    listen ${PORT}; \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    location / { \
+        try_files $uri $uri/ /index.html; \
+    } \
+}' > /etc/nginx/templates/default.conf.template
 
 # Default port (Railway will override with PORT env var)
-ENV PORT=3000
+ENV PORT=80
 
-# Start the server using shell form for variable expansion
-CMD serve dist -s -l $PORT
+# Start nginx with envsubst for dynamic port
+CMD sh -c "envsubst '\$PORT' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
