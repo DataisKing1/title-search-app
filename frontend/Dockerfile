@@ -21,8 +21,9 @@ FROM nginx:alpine AS runner
 # Copy built files to nginx html directory
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Create nginx config template for dynamic port
-RUN echo 'server { \
+# Create nginx config template directory and file for dynamic port
+RUN mkdir -p /etc/nginx/templates && \
+    echo 'server { \
     listen ${PORT}; \
     root /usr/share/nginx/html; \
     index index.html; \
