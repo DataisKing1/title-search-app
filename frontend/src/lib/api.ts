@@ -166,6 +166,11 @@ export const searchesApi = {
     return response.data
   },
 
+  runSync: async (id: number) => {
+    const response = await api.post(`/searches/${id}/run-sync`)
+    return response.data
+  },
+
   delete: async (id: number) => {
     const response = await api.delete(`/searches/${id}`)
     return response.data

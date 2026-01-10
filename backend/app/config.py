@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Title Search Application"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
+    DEBUG: bool = True  # Enable for local development (API docs at /api/docs)
     ENVIRONMENT: str = "development"
 
     # API

@@ -15,6 +15,7 @@ import {
   Link as LinkIcon,
   Download,
   Shield,
+  Play,
 } from 'lucide-react'
 
 interface SearchDocument {
@@ -111,6 +112,22 @@ export default function SearchDetail() {
     },
   })
 
+  const runSyncMutation = useMutation({
+    mutationFn: () => searchesApi.runSync(Number(id)),
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success(`Search completed - found ${data.documents_found} documents`)
+      } else {
+        toast.error(data.error || 'Search failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['search', id] })
+      queryClient.invalidateQueries({ queryKey: ['search', id, 'documents'] })
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to run search')
+    },
+  })
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -198,6 +215,16 @@ export default function SearchDetail() {
         </div>
 
         <div className="flex gap-2">
+          {(search.status === 'pending' || search.status === 'failed') && (
+            <button
+              onClick={() => runSyncMutation.mutate()}
+              disabled={runSyncMutation.isPending}
+              className="btn btn-primary flex items-center"
+            >
+              <Play className="h-4 w-4 mr-2" />
+              {runSyncMutation.isPending ? 'Running...' : 'Run Manually'}
+            </button>
+          )}
           {search.status === 'failed' && (
             <button
               onClick={() => retryMutation.mutate()}
