@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { searchesApi } from '../../lib/api'
-import { Plus, Search, ChevronLeft, ChevronRight, Play, Eye, Loader2 } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Play, Eye, Loader2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function SearchList() {
@@ -37,6 +37,23 @@ export default function SearchList() {
       toast.error(error.response?.data?.detail || 'Failed to run search')
     },
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: (searchId: number) => searchesApi.delete(searchId),
+    onSuccess: () => {
+      toast.success('Search deleted')
+      queryClient.invalidateQueries({ queryKey: ['searches'] })
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to delete search')
+    },
+  })
+
+  const handleDelete = (searchId: number, refNumber: string) => {
+    if (window.confirm(`Are you sure you want to delete search ${refNumber}? This action cannot be undone.`)) {
+      deleteMutation.mutate(searchId)
+    }
+  }
 
   const getStatusBadge = (status: string) => {
     const colors: Record<string, string> = {
@@ -200,6 +217,14 @@ export default function SearchList() {
                           >
                             <Eye className="h-4 w-4" />
                           </Link>
+                          <button
+                            onClick={() => handleDelete(search.id, search.reference_number)}
+                            disabled={deleteMutation.isPending || ['scraping', 'analyzing', 'generating'].includes(search.status)}
+                            className="p-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Delete search"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>

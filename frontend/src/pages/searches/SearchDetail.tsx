@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { searchesApi } from '../../lib/api'
 import toast from 'react-hot-toast'
@@ -16,6 +16,7 @@ import {
   Download,
   Shield,
   Play,
+  Trash2,
 } from 'lucide-react'
 
 interface SearchDocument {
@@ -58,6 +59,7 @@ interface EncumbranceEntry {
 
 export default function SearchDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
   const { data: search, isLoading, error } = useQuery({
@@ -127,6 +129,24 @@ export default function SearchDetail() {
       toast.error(error.response?.data?.detail || 'Failed to run search')
     },
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => searchesApi.delete(Number(id)),
+    onSuccess: () => {
+      toast.success('Search deleted')
+      queryClient.invalidateQueries({ queryKey: ['searches'] })
+      navigate('/searches')
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to delete search')
+    },
+  })
+
+  const handleDelete = () => {
+    if (window.confirm('Are you sure you want to delete this search? This action cannot be undone.')) {
+      deleteMutation.mutate()
+    }
+  }
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -245,6 +265,15 @@ export default function SearchDetail() {
               Cancel
             </button>
           )}
+          <button
+            onClick={handleDelete}
+            disabled={deleteMutation.isPending || isInProgress}
+            className="btn btn-secondary flex items-center text-red-600 hover:text-red-700 hover:bg-red-50"
+            title={isInProgress ? 'Cannot delete while search is in progress' : 'Delete search'}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete
+          </button>
         </div>
       </div>
 
