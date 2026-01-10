@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 import os
@@ -37,8 +37,7 @@ class DocumentResponse(BaseModel):
     needs_review: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -124,7 +123,7 @@ def validate_upload_file(file: UploadFile, file_size: int) -> None:
     if file_size > settings.max_upload_size_bytes:
         max_mb = settings.MAX_UPLOAD_SIZE_MB
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File too large. Maximum size is {max_mb}MB"
         )
 

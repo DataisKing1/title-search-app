@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Background
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from datetime import datetime
 import secrets
@@ -51,8 +51,7 @@ class PropertyResponse(BaseModel):
     parcel_number: Optional[str]
     legal_description: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SearchResponse(BaseModel):
@@ -78,8 +77,7 @@ class SearchResponse(BaseModel):
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SearchListResponse(BaseModel):
@@ -546,8 +544,7 @@ class SearchDocumentResponse(BaseModel):
     needs_review: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChainOfTitleResponse(BaseModel):
@@ -563,8 +560,7 @@ class ChainOfTitleResponse(BaseModel):
     description: Optional[str]
     ai_narrative: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EncumbranceResponse(BaseModel):
@@ -582,8 +578,7 @@ class EncumbranceResponse(BaseModel):
     risk_level: str
     requires_action: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/{search_id}/documents", response_model=List[SearchDocumentResponse])
