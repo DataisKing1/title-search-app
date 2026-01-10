@@ -103,12 +103,39 @@ app.include_router(counties_router, prefix=settings.API_PREFIX)
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - verifies app is running"""
     return {
         "status": "healthy",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION
     }
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    """Readiness check - verifies database connectivity"""
+    from app.database import async_session_maker
+    from sqlalchemy import text
+
+    try:
+        async with async_session_maker() as session:
+            await session.execute(text("SELECT 1"))
+        return {
+            "status": "ready",
+            "database": "connected",
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION
+        }
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "database": "disconnected",
+                "error": str(e)
+            }
+        )
 
 
 @app.get("/")

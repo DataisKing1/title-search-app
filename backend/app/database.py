@@ -10,11 +10,26 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+# Determine database type and set appropriate pool settings
+is_sqlite = "sqlite" in settings.async_database_url
+
+# Connection pool settings for PostgreSQL (production)
+pool_kwargs = {}
+if not is_sqlite:
+    pool_kwargs = {
+        "pool_pre_ping": True,  # Verify connections before use
+        "pool_size": 5,  # Number of connections to keep open
+        "max_overflow": 10,  # Additional connections when pool is exhausted
+        "pool_timeout": 30,  # Seconds to wait for a connection
+        "pool_recycle": 1800,  # Recycle connections after 30 minutes
+    }
+
 # Create async engine
 engine = create_async_engine(
     settings.async_database_url,
     echo=settings.DATABASE_ECHO,
     future=True,
+    **pool_kwargs
 )
 
 # Create async session factory
