@@ -1,18 +1,41 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { searchesApi } from '../../lib/api'
-import { Plus, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Play, Eye, Loader2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export default function SearchList() {
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [countyFilter, setCountyFilter] = useState('')
+  const [runningSearchId, setRunningSearchId] = useState<number | null>(null)
+  const queryClient = useQueryClient()
 
   const { data, isLoading } = useQuery({
     queryKey: ['searches', page, statusFilter, countyFilter],
     queryFn: () =>
       searchesApi.list(page, 20, statusFilter || undefined, countyFilter || undefined),
+  })
+
+  const runSyncMutation = useMutation({
+    mutationFn: (searchId: number) => {
+      setRunningSearchId(searchId)
+      return searchesApi.runSync(searchId)
+    },
+    onSuccess: (data, searchId) => {
+      setRunningSearchId(null)
+      if (data.success) {
+        toast.success(`Search completed - found ${data.documents_found} documents`)
+      } else {
+        toast.error(data.error || 'Search failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['searches'] })
+    },
+    onError: (error: any) => {
+      setRunningSearchId(null)
+      toast.error(error.response?.data?.detail || 'Failed to run search')
+    },
   })
 
   const getStatusBadge = (status: string) => {
@@ -112,6 +135,9 @@ export default function SearchList() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Created
                     </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -150,6 +176,31 @@ export default function SearchList() {
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500">
                         {new Date(search.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {(search.status === 'pending' || search.status === 'failed') && (
+                            <button
+                              onClick={() => runSyncMutation.mutate(search.id)}
+                              disabled={runningSearchId === search.id}
+                              className="p-1.5 rounded-lg bg-primary-100 text-primary-600 hover:bg-primary-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Run search manually"
+                            >
+                              {runningSearchId === search.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Play className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
+                          <Link
+                            to={`/searches/${search.id}`}
+                            className="p-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            title="View details"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))}
