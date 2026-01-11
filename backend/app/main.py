@@ -16,6 +16,7 @@ from app.routers import (
     batch_router,
     counties_router,
     chain_analysis_router,
+    encumbrances_router,
 )
 
 # Configure logging
@@ -100,6 +101,7 @@ app.include_router(reports_router, prefix=settings.API_PREFIX)
 app.include_router(batch_router, prefix=settings.API_PREFIX)
 app.include_router(counties_router, prefix=settings.API_PREFIX)
 app.include_router(chain_analysis_router, prefix=settings.API_PREFIX)
+app.include_router(encumbrances_router, prefix=settings.API_PREFIX)
 
 
 # Health check endpoint
