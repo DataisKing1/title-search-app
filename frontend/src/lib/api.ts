@@ -195,6 +195,16 @@ export const searchesApi = {
     const response = await api.get(`/searches/${id}/chain-analysis`)
     return response.data
   },
+
+  getErrors: async (id: number) => {
+    const response = await api.get(`/searches/${id}/errors`)
+    return response.data
+  },
+
+  markPartialComplete: async (id: number) => {
+    const response = await api.post(`/searches/${id}/mark-partial`)
+    return response.data
+  },
 }
 
 // Documents API

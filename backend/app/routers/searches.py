@@ -350,7 +350,9 @@ async def retry_search(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Retry a failed search"""
+    """Retry a failed search with smart recovery"""
+    from app.services.error_handling import recovery_manager
+
     result = await db.execute(
         select(TitleSearch).where(TitleSearch.id == search_id)
     )
@@ -368,22 +370,50 @@ async def retry_search(
             detail="Can only retry failed searches"
         )
 
+    # Check if retry is advisable
+    can_retry, reason = recovery_manager.can_resume(
+        search.status.value,
+        search.error_log or [],
+        search.retry_count
+    )
+
+    if not can_retry and search.retry_count >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot retry: {reason}. Maximum attempts exceeded."
+        )
+
+    # Determine where to resume from
+    resume_step = recovery_manager.get_resume_step(search.error_log or [])
+
     search.status = SearchStatus.PENDING
-    search.status_message = "Retrying..."
+    search.status_message = f"Retrying from {resume_step or 'beginning'}..."
     search.retry_count += 1
-    search.progress_percent = 0
+
+    # Don't reset progress if we can resume from a later step
+    if resume_step and resume_step != "orchestrate_search":
+        # Keep some progress if resuming from later step
+        pass
+    else:
+        search.progress_percent = 0
 
     # Queue Celery task for retry
     try:
         from tasks.search_tasks import orchestrate_search
 
+        # Use higher priority queue for retries
+        queue = "high_priority" if search.retry_count > 1 else "default"
+
+        # Add delay based on retry count (exponential backoff)
+        countdown = min(60 * search.retry_count, 300)
+
         task = orchestrate_search.apply_async(
             args=[search.id],
-            queue="default",
-            countdown=1
+            queue=queue,
+            countdown=countdown
         )
         search.celery_task_id = task.id
-        logger.info(f"Queued retry for search {search_id} as task {task.id}")
+        logger.info(f"Queued retry #{search.retry_count} for search {search_id} as task {task.id}")
 
     except Exception as e:
         logger.error(f"Failed to queue retry task: {e}")
@@ -392,7 +422,112 @@ async def retry_search(
 
     await db.commit()
 
-    return {"message": "Search retry initiated"}
+    return {
+        "message": "Search retry initiated",
+        "retry_count": search.retry_count,
+        "resume_from": resume_step,
+    }
+
+
+@router.get("/{search_id}/errors")
+async def get_search_errors(
+    search_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed error information and recovery options for a search"""
+    from app.services.error_handling import recovery_manager
+
+    result = await db.execute(
+        select(TitleSearch).where(TitleSearch.id == search_id)
+    )
+    search = result.scalar_one_or_none()
+
+    if not search:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search not found"
+        )
+
+    error_log = search.error_log or []
+
+    # Get recovery options
+    recovery_options = recovery_manager.get_recovery_options(
+        search.status.value,
+        error_log,
+        search.retry_count,
+        search.progress_percent
+    )
+
+    return {
+        "search_id": search_id,
+        "status": search.status.value,
+        "status_message": search.status_message,
+        "retry_count": search.retry_count,
+        "progress_percent": search.progress_percent,
+        "error_log": error_log,
+        "recovery": recovery_options,
+    }
+
+
+@router.post("/{search_id}/mark-partial")
+async def mark_partial_complete(
+    search_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Mark a failed search as partially complete with available data"""
+    result = await db.execute(
+        select(TitleSearch)
+        .options(
+            selectinload(TitleSearch.documents),
+            selectinload(TitleSearch.chain_of_title),
+        )
+        .where(TitleSearch.id == search_id)
+    )
+    search = result.scalar_one_or_none()
+
+    if not search:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search not found"
+        )
+
+    if search.status not in [SearchStatus.FAILED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only mark failed searches as partial"
+        )
+
+    # Check if there's enough data to be useful
+    doc_count = len(search.documents) if search.documents else 0
+    chain_count = len(search.chain_of_title) if search.chain_of_title else 0
+
+    if doc_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No documents found. Cannot mark as partial complete."
+        )
+
+    # Update status
+    search.status = SearchStatus.COMPLETED
+    search.status_message = f"Partial results: {doc_count} documents, {chain_count} chain entries"
+    search.completed_at = datetime.utcnow()
+
+    # Add note to error log
+    search.error_log = (search.error_log or []) + [{
+        "timestamp": datetime.utcnow().isoformat(),
+        "task": "mark_partial_complete",
+        "note": f"Marked as partial by user. Documents: {doc_count}, Chain: {chain_count}"
+    }]
+
+    await db.commit()
+
+    return {
+        "message": "Search marked as partially complete",
+        "documents": doc_count,
+        "chain_entries": chain_count,
+    }
 
 
 @router.post("/{search_id}/run-sync")

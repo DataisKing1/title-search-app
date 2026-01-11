@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { searchesApi, reportsApi } from '../../lib/api'
 import toast from 'react-hot-toast'
 import ChainBreakAlert from '../../components/ChainBreakAlert'
+import SearchErrorPanel from '../../components/SearchErrorPanel'
 import {
   ArrowLeft,
   RefreshCw,
@@ -333,6 +334,17 @@ export default function SearchDetail() {
           </div>
         </div>
       </div>
+
+      {/* Error Panel for Failed Searches */}
+      {search.status === 'failed' && (
+        <SearchErrorPanel
+          searchId={Number(id)}
+          status={search.status}
+          onRetry={() => {
+            queryClient.invalidateQueries({ queryKey: ['search', id] })
+          }}
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Property Information */}
