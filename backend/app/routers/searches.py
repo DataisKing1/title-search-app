@@ -479,7 +479,20 @@ async def run_search_sync(
             script_content = '''
 import sys
 import json
+import re
 from datetime import datetime
+
+def normalize_address_for_search(address):
+    """Strip street suffixes for better search results."""
+    if not address:
+        return address
+    # Common street suffixes to remove
+    suffixes = r"\\b(drive|dr|street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln|way|court|ct|circle|cir|place|pl|terrace|ter|trail|trl)\\b\\.?"
+    # Remove suffix (case insensitive)
+    normalized = re.sub(suffixes, "", address, flags=re.IGNORECASE).strip()
+    # Clean up extra spaces
+    normalized = re.sub(r"\\s+", " ", normalized).strip()
+    return normalized
 
 try:
     from playwright.sync_api import sync_playwright
@@ -489,6 +502,9 @@ try:
     parcel_number = sys.argv[3]
 
     all_results = []
+
+    # Normalize address - strip street suffixes for better search
+    search_address = normalize_address_for_search(street_address)
 
     # Jefferson County URLs and selectors
     SEARCH_URL = "https://landrecords.co.jefferson.co.us/RealEstate/SearchEntry.aspx"
@@ -506,12 +522,12 @@ try:
             page.goto(SEARCH_URL, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(2000)
 
-            # Search by address
-            if street_address:
+            # Search by address (using normalized address)
+            if search_address:
                 address_input = page.locator(SELECTORS["address"])
                 if address_input.count() > 0:
                     address_input.click()
-                    address_input.type(street_address, delay=50)
+                    address_input.type(search_address, delay=50)
                     page.wait_for_timeout(500)
 
                     search_btn = page.locator(SELECTORS["search_button"])
@@ -654,17 +670,28 @@ except Exception as e:
             doc_type_str = doc_data.get("document_type", "other")
             doc_type = doc_type_map.get(doc_type_str, DocumentType.OTHER)
 
+            # Parse recording date - handle string dates from scraping
+            recording_date = doc_data.get("recording_date")
+            if isinstance(recording_date, str):
+                try:
+                    recording_date = datetime.strptime(recording_date, "%m/%d/%Y")
+                except ValueError:
+                    try:
+                        recording_date = datetime.strptime(recording_date, "%Y-%m-%d")
+                    except ValueError:
+                        recording_date = None
+
             doc = Document(
                 search_id=search.id,
                 document_type=doc_type,
                 instrument_number=doc_data.get("instrument_number"),
-                recording_date=doc_data.get("recording_date"),
+                recording_date=recording_date,
                 grantor=doc_data.get("grantor", []),
                 grantee=doc_data.get("grantee", []),
                 consideration=doc_data.get("consideration"),
                 source=DocumentSource.COUNTY_RECORDER,
                 source_url=doc_data.get("source_url"),
-                raw_text=doc_data.get("raw_text"),
+                
             )
             db.add(doc)
 
