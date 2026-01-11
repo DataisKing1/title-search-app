@@ -233,6 +233,15 @@ export const reportsApi = {
     return response.data
   },
 
+  generate: async (searchId: number) => {
+    const response = await api.post('/reports/generate', { search_id: searchId })
+    return response.data
+  },
+
+  downloadUrl: (id: number) => {
+    return `${API_URL}/reports/${id}/download`
+  },
+
   exportJson: async (id: number) => {
     const response = await api.get(`/reports/${id}/export/json`)
     return response.data

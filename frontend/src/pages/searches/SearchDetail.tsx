@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { searchesApi } from '../../lib/api'
+import { searchesApi, reportsApi } from '../../lib/api'
 import toast from 'react-hot-toast'
 import ChainBreakAlert from '../../components/ChainBreakAlert'
 import {
@@ -18,6 +18,7 @@ import {
   Shield,
   Play,
   Trash2,
+  FileCheck,
 } from 'lucide-react'
 
 interface SearchDocument {
@@ -149,6 +150,17 @@ export default function SearchDetail() {
     },
   })
 
+  const generateReportMutation = useMutation({
+    mutationFn: () => reportsApi.generate(Number(id)),
+    onSuccess: (data) => {
+      toast.success('Report generated successfully')
+      navigate(`/reports/${data.id}`)
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to generate report')
+    },
+  })
+
   const handleDelete = () => {
     if (window.confirm('Are you sure you want to delete this search? This action cannot be undone.')) {
       deleteMutation.mutate()
@@ -242,11 +254,21 @@ export default function SearchDetail() {
         </div>
 
         <div className="flex gap-2">
+          {search.status === 'completed' && (
+            <button
+              onClick={() => generateReportMutation.mutate()}
+              disabled={generateReportMutation.isPending}
+              className="btn btn-primary flex items-center"
+            >
+              <FileCheck className="h-4 w-4 mr-2" />
+              {generateReportMutation.isPending ? 'Generating...' : 'Generate Report'}
+            </button>
+          )}
           {(search.status === 'pending' || search.status === 'failed') && (
             <button
               onClick={() => runSyncMutation.mutate()}
               disabled={runSyncMutation.isPending}
-              className="btn btn-primary flex items-center"
+              className="btn btn-secondary flex items-center"
             >
               <Play className="h-4 w-4 mr-2" />
               {runSyncMutation.isPending ? 'Running...' : 'Run Manually'}

@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Reports from './pages/Reports'
+import ReportDetail from './pages/reports/ReportDetail'
 import BatchUpload from './pages/BatchUpload'
 import Settings from './pages/Settings'
 import SearchList from './pages/searches/SearchList'
@@ -40,6 +41,7 @@ function App() {
         <Route path="searches/new" element={<NewSearch />} />
         <Route path="searches/:id" element={<SearchDetail />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="reports/:id" element={<ReportDetail />} />
         <Route path="batch" element={<BatchUpload />} />
         <Route path="settings" element={<Settings />} />
       </Route>
