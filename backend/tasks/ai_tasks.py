@@ -1,13 +1,24 @@
-"""AI analysis tasks"""
+"""AI analysis tasks - Enhanced document analysis and classification"""
 from tasks.celery_app import celery_app
 from datetime import datetime
 import logging
 import os
 import json
+import asyncio
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def run_async(coro):
+    """Helper to run async functions in sync context"""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 def get_db_session():
@@ -26,14 +37,17 @@ def get_db_session():
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
 def analyze_document(self, document_id: int):
     """
-    Analyze a document with OCR and AI.
+    Analyze a document with OCR, AI, and improved classification.
 
     Steps:
     1. Extract text via OCR if needed
-    2. Send to AI for analysis
-    3. Store extracted data
+    2. Classify document type using enhanced classifier
+    3. Send to AI for document-specific analysis
+    4. Store extracted data and update document fields
     """
-    from app.models.document import Document
+    from app.models.document import Document, DocumentType
+    from app.services.document_classifier import classify_document
+    from app.services.ai_analysis import analyze_document_text
 
     db = get_db_session()
 
@@ -52,29 +66,79 @@ def analyze_document(self, document_id: int):
                 document.ocr_confidence = ocr_result.get("confidence", 0)
                 db.commit()
 
-        # Step 2: AI Analysis if we have text
-        if document.ocr_text or document.ai_extracted_data:
-            text_to_analyze = document.ocr_text or ""
+        text_to_analyze = document.ocr_text or ""
 
-            ai_result = _analyze_with_ai(
+        # Step 2: Enhanced document classification
+        if text_to_analyze and (document.document_type == DocumentType.OTHER or not document.document_type):
+            # Get raw doc type from ai_extracted_data if available
+            raw_type = None
+            if document.ai_extracted_data:
+                raw_type = document.ai_extracted_data.get("doc_type_raw")
+
+            classified_type, confidence, classification_details = classify_document(
                 text=text_to_analyze,
-                document_type=document.document_type.value,
-                instrument_number=document.instrument_number
+                filename=document.file_name,
+                raw_doc_type=raw_type
             )
 
+            if confidence >= 0.25 and classified_type != DocumentType.OTHER:
+                logger.info(f"Reclassified document from {document.document_type} to {classified_type} "
+                           f"(confidence: {confidence:.2f})")
+                document.document_type = classified_type
+
+                # Store classification details
+                if not document.ai_extracted_data:
+                    document.ai_extracted_data = {}
+                document.ai_extracted_data["classification"] = {
+                    "type": classified_type.value,
+                    "confidence": confidence,
+                    "details": classification_details
+                }
+                db.commit()
+
+        # Step 3: AI Analysis if we have text
+        if text_to_analyze:
+            # Use enhanced AI analysis
+            ai_result = run_async(analyze_document_text(
+                text=text_to_analyze,
+                document_type=document.document_type,
+                instrument_number=document.instrument_number,
+                additional_context={
+                    "filename": document.file_name,
+                    "recording_date": document.recording_date.isoformat() if document.recording_date else None
+                }
+            ))
+
             if ai_result.get("success"):
-                document.ai_extracted_data = ai_result.get("extracted_data", {})
-                document.ai_summary = ai_result.get("summary", "")
+                extracted = ai_result.get("extracted_data", {})
+
+                # Merge with existing data
+                if document.ai_extracted_data:
+                    document.ai_extracted_data.update(extracted)
+                else:
+                    document.ai_extracted_data = extracted
+
+                document.ai_summary = ai_result.get("summary", "") or extracted.get("summary", "")
                 document.ai_analysis_at = datetime.utcnow()
 
                 # Update document fields from AI extraction
-                extracted = ai_result.get("extracted_data", {})
-                if extracted.get("grantor") and not document.grantor:
-                    document.grantor = extracted["grantor"]
-                if extracted.get("grantee") and not document.grantee:
-                    document.grantee = extracted["grantee"]
-                if extracted.get("consideration") and not document.consideration:
-                    document.consideration = extracted["consideration"]
+                parties = extracted.get("parties", {})
+                if parties.get("grantor") and not document.grantor:
+                    document.grantor = parties["grantor"]
+                if parties.get("grantee") and not document.grantee:
+                    document.grantee = parties["grantee"]
+
+                financial = extracted.get("financial", {})
+                if financial.get("consideration") and not document.consideration:
+                    document.consideration = financial["consideration"]
+
+                # Check for issues that need review
+                issues = extracted.get("issues_detected", [])
+                critical_issues = [i for i in issues if i.get("severity") == "critical"]
+                if critical_issues:
+                    document.needs_review = True
+                    document.is_critical = True
+                    document.review_notes = f"AI detected {len(critical_issues)} critical issue(s)"
 
                 db.commit()
 
@@ -84,7 +148,9 @@ def analyze_document(self, document_id: int):
             "success": True,
             "document_id": document_id,
             "has_ocr": bool(document.ocr_text),
-            "has_ai_analysis": bool(document.ai_extracted_data)
+            "has_ai_analysis": bool(document.ai_extracted_data),
+            "document_type": document.document_type.value,
+            "needs_review": document.needs_review
         }
 
     except Exception as e:
@@ -371,6 +437,142 @@ def generate_risk_assessment(search_id: int):
 
     except Exception as e:
         logger.error(f"Risk assessment failed: {e}")
+        return {"success": False, "error": str(e)}
+
+    finally:
+        db.close()
+
+
+@celery_app.task
+def reclassify_other_documents(search_id: int = None, limit: int = 100):
+    """
+    Reclassify documents that are currently typed as 'Other'.
+
+    Args:
+        search_id: Optional - only reclassify documents from this search
+        limit: Maximum number of documents to process
+    """
+    from app.models.document import Document, DocumentType
+    from app.services.document_classifier import classify_document
+
+    db = get_db_session()
+
+    try:
+        query = db.query(Document).filter(Document.document_type == DocumentType.OTHER)
+
+        if search_id:
+            query = query.filter(Document.search_id == search_id)
+
+        documents = query.limit(limit).all()
+        logger.info(f"Found {len(documents)} documents typed as 'Other' to reclassify")
+
+        results = {
+            "processed": 0,
+            "reclassified": 0,
+            "unchanged": 0,
+            "reclassifications": []
+        }
+
+        for doc in documents:
+            results["processed"] += 1
+
+            # Need text content to classify
+            text = doc.ocr_text or ""
+            if not text and doc.ai_extracted_data:
+                # Try to use existing AI extraction as text source
+                text = str(doc.ai_extracted_data)
+
+            if len(text) < 50:
+                results["unchanged"] += 1
+                continue
+
+            # Get raw doc type hint if available
+            raw_type = None
+            if doc.ai_extracted_data:
+                raw_type = doc.ai_extracted_data.get("doc_type_raw")
+
+            classified_type, confidence, details = classify_document(
+                text=text,
+                filename=doc.file_name,
+                raw_doc_type=raw_type
+            )
+
+            if classified_type != DocumentType.OTHER and confidence >= 0.20:
+                old_type = doc.document_type.value
+                doc.document_type = classified_type
+
+                # Update AI extracted data with classification info
+                if not doc.ai_extracted_data:
+                    doc.ai_extracted_data = {}
+                doc.ai_extracted_data["classification"] = {
+                    "reclassified_from": old_type,
+                    "new_type": classified_type.value,
+                    "confidence": confidence,
+                    "reclassified_at": datetime.utcnow().isoformat()
+                }
+
+                results["reclassified"] += 1
+                results["reclassifications"].append({
+                    "document_id": doc.id,
+                    "instrument_number": doc.instrument_number,
+                    "old_type": old_type,
+                    "new_type": classified_type.value,
+                    "confidence": confidence
+                })
+
+                logger.info(f"Reclassified document {doc.id} ({doc.instrument_number}) "
+                           f"from {old_type} to {classified_type.value}")
+            else:
+                results["unchanged"] += 1
+
+        db.commit()
+
+        logger.info(f"Reclassification complete: {results['reclassified']}/{results['processed']} documents updated")
+        return {"success": True, **results}
+
+    except Exception as e:
+        logger.error(f"Reclassification failed: {e}")
+        db.rollback()
+        return {"success": False, "error": str(e)}
+
+    finally:
+        db.close()
+
+
+@celery_app.task
+def batch_analyze_documents(search_id: int):
+    """
+    Analyze all documents for a search that haven't been analyzed yet.
+    """
+    from app.models.document import Document
+
+    db = get_db_session()
+
+    try:
+        # Find documents needing analysis
+        documents = db.query(Document).filter(
+            Document.search_id == search_id,
+            Document.ai_analysis_at.is_(None)
+        ).all()
+
+        logger.info(f"Found {len(documents)} documents to analyze for search {search_id}")
+
+        results = {
+            "total": len(documents),
+            "queued": 0,
+            "document_ids": []
+        }
+
+        for doc in documents:
+            # Queue each document for analysis
+            analyze_document.delay(doc.id)
+            results["queued"] += 1
+            results["document_ids"].append(doc.id)
+
+        return {"success": True, **results}
+
+    except Exception as e:
+        logger.error(f"Batch analysis failed: {e}")
         return {"success": False, "error": str(e)}
 
     finally:
