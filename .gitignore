@@ -75,3 +75,4 @@ celerybeat.pid
 
 # Docker
 .docker/
+.claude/
