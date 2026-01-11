@@ -800,6 +800,14 @@ class SearchStatsResponse(BaseModel):
     in_progress: int
     failed: int
     pending: int
+    # Enhanced stats for dashboard
+    documents_count: int = 0
+    encumbrances_count: int = 0
+    pending_review: int = 0
+    this_week: int = 0
+    this_month: int = 0
+    by_county: dict = {}
+    by_status: dict = {}
 
 
 @router.get("/stats/dashboard", response_model=SearchStatsResponse)
@@ -808,6 +816,8 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db)
 ):
     """Get aggregated statistics for dashboard"""
+    from datetime import timedelta
+
     # Get total count
     total_result = await db.execute(select(func.count(TitleSearch.id)))
     total = total_result.scalar() or 0
@@ -842,12 +852,70 @@ async def get_dashboard_stats(
     )
     in_progress = in_progress_result.scalar() or 0
 
+    # Get total documents count
+    docs_result = await db.execute(select(func.count(Document.id)))
+    documents_count = docs_result.scalar() or 0
+
+    # Get active encumbrances count
+    enc_result = await db.execute(
+        select(func.count(Encumbrance.id)).where(
+            Encumbrance.status == EncumbranceStatus.ACTIVE
+        )
+    )
+    encumbrances_count = enc_result.scalar() or 0
+
+    # Get documents needing review
+    review_result = await db.execute(
+        select(func.count(Document.id)).where(Document.needs_review == True)
+    )
+    pending_review = review_result.scalar() or 0
+
+    # Get searches this week
+    now = datetime.utcnow()
+    week_ago = now - timedelta(days=7)
+    week_result = await db.execute(
+        select(func.count(TitleSearch.id)).where(TitleSearch.created_at >= week_ago)
+    )
+    this_week = week_result.scalar() or 0
+
+    # Get searches this month
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_result = await db.execute(
+        select(func.count(TitleSearch.id)).where(
+            TitleSearch.created_at >= month_start,
+            TitleSearch.status == SearchStatus.COMPLETED
+        )
+    )
+    this_month = month_result.scalar() or 0
+
+    # Get counts by county
+    county_result = await db.execute(
+        select(Property.county, func.count(TitleSearch.id))
+        .join(Property, TitleSearch.property_id == Property.id)
+        .group_by(Property.county)
+    )
+    by_county = {row[0]: row[1] for row in county_result.all()}
+
+    # Get counts by status
+    status_result = await db.execute(
+        select(TitleSearch.status, func.count(TitleSearch.id))
+        .group_by(TitleSearch.status)
+    )
+    by_status = {row[0].value: row[1] for row in status_result.all()}
+
     return SearchStatsResponse(
         total=total,
         completed=completed,
         in_progress=in_progress,
         failed=failed,
-        pending=pending
+        pending=pending,
+        documents_count=documents_count,
+        encumbrances_count=encumbrances_count,
+        pending_review=pending_review,
+        this_week=this_week,
+        this_month=this_month,
+        by_county=by_county,
+        by_status=by_status,
     )
 
 
