@@ -173,36 +173,265 @@ def scrape_county_recorder(self, search_id: int, county: str, parcel: str, addre
 
 @celery_app.task(bind=True)
 def scrape_court_records(self, previous_result: dict, search_id: int, county: str):
-    """Scrape court records for judgments, lis pendens, etc."""
+    """
+    Scrape court records for judgments, lis pendens, foreclosures, etc.
+
+    Searches Colorado Judicial Branch by current property owner name.
+    Creates Document records with source=COURT_RECORDS and
+    Encumbrance records for active cases.
+    """
     from app.models.search import TitleSearch
+    from app.models.document import Document, DocumentType, DocumentSource
+    from app.models.encumbrance import Encumbrance, EncumbranceType, EncumbranceStatus
 
     db = get_db_session()
 
     try:
         search = db.query(TitleSearch).filter(TitleSearch.id == search_id).first()
+        if not search:
+            logger.error(f"Search {search_id} not found")
+            return {"success": False, "error": "Search not found", "court_records_count": 0}
+
         search.status_message = f"Searching {county} County court records..."
         search.progress_percent = 35
         db.commit()
 
-        # TODO: Implement court records scraping
-        # For now, return placeholder
-        logger.info(f"Court records scraping for {county} County (not yet implemented)")
+        # Get current owner name from most recent deed
+        owner_names = _get_current_owner_names(db, search_id)
+
+        if not owner_names:
+            logger.warning(f"No owner names found for search {search_id}, skipping court records")
+            search.progress_percent = 40
+            search.status_message = "No owner names found for court search"
+            db.commit()
+            return {
+                "success": True,
+                "court_records_count": 0,
+                "previous_result": previous_result,
+                "message": "No owner names to search"
+            }
+
+        logger.info(f"Searching court records for owners: {owner_names}")
+
+        # Run async court scraping
+        from tasks.scraping_tasks import run_async
+        court_results = run_async(_do_court_scrape(owner_names, county))
+
+        # Process results - create documents and encumbrances
+        document_count = 0
+        encumbrance_count = 0
+
+        for result in court_results:
+            # Create document record
+            doc_type = _map_case_type_to_doc_type(result.case_type)
+
+            doc = Document(
+                search_id=search_id,
+                document_type=doc_type,
+                instrument_number=result.case_number,
+                recording_date=result.filing_date,
+                grantor=result.parties[:1] if result.parties else [],  # plaintiff
+                grantee=result.parties[1:2] if len(result.parties) > 1 else [],  # defendant
+                source=DocumentSource.COURT_RECORDS,
+                source_url=result.case_url,
+                ai_summary=f"{result.case_type.value.title()} case: {result.description or result.case_number}"
+            )
+            db.add(doc)
+            db.flush()  # Get document ID
+            document_count += 1
+
+            # Create encumbrance for open cases
+            from app.scraping.court.base_court_adapter import CaseStatus
+            if result.status in [CaseStatus.OPEN, CaseStatus.PENDING, CaseStatus.UNKNOWN]:
+                enc_type = _map_case_type_to_enc_type(result.case_type)
+                if enc_type:
+                    encumbrance = Encumbrance(
+                        search_id=search_id,
+                        document_id=doc.id,
+                        encumbrance_type=enc_type,
+                        status=EncumbranceStatus.ACTIVE,
+                        holder_name=result.parties[0] if result.parties else None,
+                        recorded_date=result.filing_date,
+                        recording_reference=result.case_number,
+                        description=f"Court case: {result.court_name} - {result.case_number}",
+                        risk_level="high" if result.case_type.value == "foreclosure" else "medium",
+                        requires_action=True,
+                        action_description=f"Review {result.case_type.value} case status"
+                    )
+                    db.add(encumbrance)
+                    encumbrance_count += 1
+
+        db.commit()
 
         search.progress_percent = 40
+        search.status_message = f"Found {document_count} court records"
         db.commit()
+
+        logger.info(f"Court records complete: {document_count} documents, {encumbrance_count} encumbrances")
 
         return {
             "success": True,
-            "court_records_count": 0,
+            "court_records_count": document_count,
+            "encumbrance_count": encumbrance_count,
             "previous_result": previous_result
         }
 
     except Exception as e:
         logger.error(f"Court records scraping failed: {e}")
-        return {"success": False, "error": str(e), "court_records_count": 0}
+        # Update search with error but don't fail completely
+        try:
+            search = db.query(TitleSearch).filter(TitleSearch.id == search_id).first()
+            if search:
+                search.error_log = search.error_log or []
+                search.error_log.append({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "task": "scrape_court_records",
+                    "error": str(e),
+                    "severity": "warning"
+                })
+                search.progress_percent = 40
+                db.commit()
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "error": str(e),
+            "court_records_count": 0,
+            "previous_result": previous_result
+        }
 
     finally:
         db.close()
+
+
+def _get_current_owner_names(db, search_id: int) -> list:
+    """
+    Get current property owner names from the most recent deed.
+
+    Returns list of (last_name, first_name) tuples.
+    """
+    from app.models.document import Document, DocumentType
+
+    # Get most recent deed for this search
+    recent_deed = db.query(Document).filter(
+        Document.search_id == search_id,
+        Document.document_type.in_([DocumentType.DEED, DocumentType.DEED_OF_TRUST])
+    ).order_by(Document.recording_date.desc()).first()
+
+    if not recent_deed or not recent_deed.grantee:
+        return []
+
+    owner_names = []
+    for name in recent_deed.grantee:
+        if not name:
+            continue
+        # Parse name into (last, first) tuple
+        name = name.strip()
+        if "," in name:
+            parts = name.split(",", 1)
+            owner_names.append((parts[0].strip(), parts[1].strip() if len(parts) > 1 else None))
+        else:
+            # Assume "First Last" format - take last word as last name
+            parts = name.split()
+            if len(parts) >= 2:
+                owner_names.append((parts[-1], " ".join(parts[:-1])))
+            else:
+                owner_names.append((name, None))
+
+    return owner_names
+
+
+async def _do_court_scrape(owner_names: list, county: str):
+    """
+    Async court records scraping implementation.
+
+    Args:
+        owner_names: List of (last_name, first_name) tuples
+        county: County name
+
+    Returns:
+        List of CourtSearchResult objects
+    """
+    from app.scraping.browser_pool import get_browser_pool
+    from app.scraping.court import get_court_adapter
+
+    results = []
+
+    # Get Colorado court adapter
+    config = {
+        "state": "CO",
+        "requests_per_minute": 5,
+        "delay_between_requests_ms": 5000,
+    }
+
+    adapter = get_court_adapter("CO", config)
+    if not adapter:
+        logger.warning("No court adapter available for Colorado")
+        return results
+
+    # Get browser from pool
+    pool = await get_browser_pool()
+
+    async with pool.acquire("court_records") as browser_instance:
+        page = browser_instance.page
+
+        # Initialize adapter
+        initialized = await adapter.initialize(page)
+        if not initialized:
+            logger.error("Failed to initialize court adapter")
+            return results
+
+        # Search for each owner name
+        for last_name, first_name in owner_names:
+            try:
+                await adapter.wait_between_requests()
+
+                name_results = await adapter.search_by_name(
+                    page,
+                    last_name=last_name,
+                    first_name=first_name,
+                    county=county
+                )
+                results.extend(name_results)
+
+                logger.info(f"Found {len(name_results)} court records for {last_name}, {first_name}")
+
+            except Exception as e:
+                logger.warning(f"Court search failed for {last_name}: {e}")
+                continue
+
+    return results
+
+
+def _map_case_type_to_doc_type(case_type):
+    """Map court case type to document type"""
+    from app.models.document import DocumentType
+    from app.scraping.court.base_court_adapter import CaseType
+
+    mapping = {
+        CaseType.FORECLOSURE: DocumentType.LIS_PENDENS,
+        CaseType.JUDGMENT: DocumentType.JUDGMENT,
+        CaseType.LIS_PENDENS: DocumentType.LIS_PENDENS,
+        CaseType.CIVIL: DocumentType.COURT_FILING,
+        CaseType.PROBATE: DocumentType.COURT_FILING,
+    }
+
+    return mapping.get(case_type, DocumentType.COURT_FILING)
+
+
+def _map_case_type_to_enc_type(case_type):
+    """Map court case type to encumbrance type"""
+    from app.models.encumbrance import EncumbranceType
+    from app.scraping.court.base_court_adapter import CaseType
+
+    mapping = {
+        CaseType.FORECLOSURE: EncumbranceType.LIS_PENDENS,
+        CaseType.JUDGMENT: EncumbranceType.JUDGMENT_LIEN,
+        CaseType.LIS_PENDENS: EncumbranceType.LIS_PENDENS,
+        CaseType.CIVIL: EncumbranceType.JUDGMENT_LIEN,  # Civil cases may result in judgments
+    }
+
+    return mapping.get(case_type)
 
 
 @celery_app.task(bind=True)

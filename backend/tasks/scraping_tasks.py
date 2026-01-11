@@ -364,3 +364,147 @@ async def _test_adapter(county_name: str):
             "adapter": adapter.__class__.__name__,
             "message": "Initialization successful" if initialized else "Initialization failed"
         }
+
+
+@celery_app.task
+def test_court_adapter():
+    """Test the Colorado court adapter initialization"""
+
+    try:
+        result = run_async(_test_court_adapter())
+        return result
+
+    except Exception as e:
+        logger.error(f"Court adapter test failed: {e}")
+        return {
+            "success": False,
+            "state": "CO",
+            "error": str(e)
+        }
+
+
+async def _test_court_adapter():
+    """Async court adapter test"""
+    from app.scraping.browser_pool import get_browser_pool
+    from app.scraping.court import get_court_adapter
+
+    config = {
+        "state": "CO",
+        "requests_per_minute": 5,
+        "delay_between_requests_ms": 5000,
+    }
+
+    adapter = get_court_adapter("CO", config)
+    if not adapter:
+        return {
+            "success": False,
+            "state": "CO",
+            "error": "No court adapter available"
+        }
+
+    pool = await get_browser_pool()
+
+    async with pool.acquire("court_test") as browser_instance:
+        page = browser_instance.page
+
+        initialized = await adapter.initialize(page)
+
+        return {
+            "success": initialized,
+            "state": "CO",
+            "adapter": adapter.__class__.__name__,
+            "message": "Court adapter initialization successful" if initialized else "Initialization failed"
+        }
+
+
+@celery_app.task(bind=True, max_retries=2)
+def search_court_by_name(self, last_name: str, first_name: str = None, county: str = None):
+    """
+    Standalone task to search Colorado court records by name.
+
+    Useful for testing or direct court record lookups.
+
+    Args:
+        last_name: Party's last name
+        first_name: Party's first name (optional)
+        county: County to filter (optional)
+
+    Returns:
+        Dict with success status and list of court records
+    """
+    try:
+        result = run_async(_search_court_by_name(last_name, first_name, county))
+        return result
+
+    except Exception as e:
+        logger.error(f"Court search failed: {e}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=30)
+        return {
+            "success": False,
+            "error": str(e),
+            "records": []
+        }
+
+
+async def _search_court_by_name(last_name: str, first_name: str = None, county: str = None):
+    """Async court name search"""
+    from app.scraping.browser_pool import get_browser_pool
+    from app.scraping.court import get_court_adapter
+
+    config = {
+        "state": "CO",
+        "requests_per_minute": 5,
+        "delay_between_requests_ms": 5000,
+    }
+
+    adapter = get_court_adapter("CO", config)
+    if not adapter:
+        return {
+            "success": False,
+            "error": "No court adapter available",
+            "records": []
+        }
+
+    pool = await get_browser_pool()
+
+    async with pool.acquire("court_search") as browser_instance:
+        page = browser_instance.page
+
+        initialized = await adapter.initialize(page)
+        if not initialized:
+            return {
+                "success": False,
+                "error": "Failed to initialize court adapter",
+                "records": []
+            }
+
+        results = await adapter.search_by_name(
+            page,
+            last_name=last_name,
+            first_name=first_name,
+            county=county
+        )
+
+        # Convert results to serializable format
+        records = []
+        for r in results:
+            records.append({
+                "case_number": r.case_number,
+                "case_type": r.case_type.value,
+                "court_name": r.court_name,
+                "filing_date": r.filing_date.isoformat() if r.filing_date else None,
+                "parties": r.parties,
+                "status": r.status.value,
+                "county": r.county,
+                "case_url": r.case_url,
+            })
+
+        return {
+            "success": True,
+            "last_name": last_name,
+            "first_name": first_name,
+            "county": county,
+            "record_count": len(records),
+            "records": records
+        }
