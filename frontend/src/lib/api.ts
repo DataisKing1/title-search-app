@@ -190,6 +190,11 @@ export const searchesApi = {
     const response = await api.get(`/searches/${id}/encumbrances`)
     return response.data
   },
+
+  getChainAnalysis: async (id: number) => {
+    const response = await api.get(`/searches/${id}/chain-analysis`)
+    return response.data
+  },
 }
 
 // Documents API

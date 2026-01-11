@@ -2,6 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { searchesApi } from '../../lib/api'
 import toast from 'react-hot-toast'
+import ChainBreakAlert from '../../components/ChainBreakAlert'
 import {
   ArrowLeft,
   RefreshCw,
@@ -90,6 +91,12 @@ export default function SearchDetail() {
     queryKey: ['search', id, 'encumbrances'],
     queryFn: () => searchesApi.getEncumbrances(Number(id)),
     enabled: !!search,
+  })
+
+  const { data: chainAnalysis, isLoading: analysisLoading } = useQuery({
+    queryKey: ['search', id, 'chain-analysis'],
+    queryFn: () => searchesApi.getChainAnalysis(Number(id)),
+    enabled: !!search && search.status === 'completed' && (chainOfTitle?.length || 0) > 0,
   })
 
   const cancelMutation = useMutation({
@@ -489,6 +496,11 @@ export default function SearchDetail() {
           </div>
         )}
       </div>
+
+      {/* Chain of Title Break Analysis */}
+      {search.status === 'completed' && (chainOfTitle?.length || 0) > 0 && (
+        <ChainBreakAlert analysis={chainAnalysis} isLoading={analysisLoading} />
+      )}
 
       {/* Chain of Title Section */}
       <div className="card">

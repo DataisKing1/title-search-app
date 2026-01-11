@@ -15,6 +15,7 @@ from app.routers import (
     reports_router,
     batch_router,
     counties_router,
+    chain_analysis_router,
 )
 
 # Configure logging
@@ -98,6 +99,7 @@ app.include_router(documents_router, prefix=settings.API_PREFIX)
 app.include_router(reports_router, prefix=settings.API_PREFIX)
 app.include_router(batch_router, prefix=settings.API_PREFIX)
 app.include_router(counties_router, prefix=settings.API_PREFIX)
+app.include_router(chain_analysis_router, prefix=settings.API_PREFIX)
 
 
 # Health check endpoint
